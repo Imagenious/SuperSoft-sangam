@@ -372,18 +372,20 @@ PAGES.dashboard = async main => {
     ${kpi("Today's Profit", money(d.today.profit), "Before expenses" + pct(d.today.profit, d.today.sales) + " · click for bill-wise", "good clickable", 'data-profit="today" title="Click for bill-wise profit"')}
     ${kpi("This Month Sales", money(d.month.sales), `${d.month.bills} bills`)}
     ${kpi("This Month Profit", money(d.month.profit), "Before expenses" + pct(d.month.profit, d.month.sales) + " · click for bill-wise", "good clickable", 'data-profit="month" title="Click for bill-wise profit"')}
-    ${kpi("Stock in Hand", qf(d.stock.pcs) + " pcs", (d.stock.mtr ? qf(d.stock.mtr) + " mtr · " : "") + "all categories")}
-    ${kpi("Stock Value", money(d.stock.value_cost), "At cost · " + money(d.stock.value_mrp) + " at MRP")}
     <div class="kpi clickable good" id="kpi-cash" title="Click for today's cash breakup">
       <div class="k">Cash in Hand</div><div class="v">${money(d.cash_in_hand)}</div>
       <div class="s">${B.settings.opening_cash_date ? "Click for today's cash flow →" : "Set opening cash for accuracy →"}</div></div>
+    <div class="kpi clickable upi" id="kpi-upi" title="Click to see today's UPI bills">
+      <div class="k">UPI Received Today</div><div class="v">${money(d.pay_today.upi)}</div>
+      <div class="s">Click to see UPI bills & tally →</div></div>
+    ${kpi("Today's Collection", money(d.pay_today.cash + d.pay_today.upi + d.pay_today.card + d.pay_today.cheque), `Cash ${m2(d.pay_today.cash)} · UPI ${m2(d.pay_today.upi)} · Card ${m2(d.pay_today.card)}${d.pay_today.cheque ? " · Cheque " + m2(d.pay_today.cheque) : ""}`)}
     ${kpi("Today's Expenses", money(d.expenses_today), "Click to add / view expenses", "clickable", 'data-go-exp')}
     ${kpi("This Month Expenses", money(d.expenses_month), "All payment modes", "clickable", 'data-go-exp')}
     ${kpi("This Month Net Profit", money(d.month.profit - d.expenses_month), `Profit ${m2(d.month.profit)} − expenses ${m2(d.expenses_month)}`, (d.month.profit - d.expenses_month) < 0 ? "alert" : "good")}
+    ${kpi("Stock in Hand", qf(d.stock.pcs) + " pcs" + (d.stock.mtr ? ` + ${qf(d.stock.mtr)} mtr` : ""), `${money(d.stock.value_cost)} at cost · ${money(d.stock.value_mrp)} at MRP`)}
     <div class="kpi clickable ${d.low_stock.length ? "alert" : ""}" id="kpi-low" title="Click to see the low-stock items">
       <div class="k">Low Stock Alerts (MOQ)</div><div class="v">${d.low_stock.length}</div>
       <div class="s">${d.low_stock.length ? "Click to see which items to reorder →" : "All items above MOQ"}</div></div>
-    ${kpi("Today's Collection", money(d.pay_today.cash + d.pay_today.upi + d.pay_today.card + d.pay_today.cheque), `Cash ${m2(d.pay_today.cash)} · UPI ${m2(d.pay_today.upi)} · Card ${m2(d.pay_today.card)}${d.pay_today.cheque ? " · Cheque " + m2(d.pay_today.cheque) : ""}`)}
   </div>
   <div class="grid g2">
     <div class="card" style="border-color:${d.low_stock.length ? "#efb2ad" : "var(--line)"}">
@@ -421,6 +423,7 @@ PAGES.dashboard = async main => {
   $$("[data-bill]", main).forEach(b => b.onclick = () => viewBill(+b.dataset.bill));
   $("#kpi-low", main).onclick = showLowStock;
   $("#kpi-cash", main).onclick = showCashToday;
+  $("#kpi-upi", main).onclick = () => showUpiTally(todayStr());
   $$("[data-go-exp]", main).forEach(k => k.onclick = () => { EX.tab = "exp"; location.hash = "#expenses"; });
   $$("[data-profit]", main).forEach(k => k.onclick = () => showProfitBreakup(k.dataset.profit));
   $$("[data-lowrow]", main).forEach(r => r.onclick = showLowStock);
@@ -504,6 +507,49 @@ async function showProfitBreakup(period) {
       <tr><td colspan="4"><b>TOTAL (${bills.length} bills)</b></td><td class="r"><b>${qf(tot("qty"))}</b></td>${["net", "gst", "taxable", "cost", "profit"].map(k => `<td class="r"><b>${m2(tot(k))}</b></td>`).join("")}</tr>
       </tbody></table></div>`, "@page { size: A4 portrait; margin: 10mm; } .inv.a4 th, .inv.a4 td { font-size: 10px; }",
       { title: "Print preview — Bill-wise profit", kind: "report" });
+  };
+  go();
+}
+
+// End-of-day UPI tally: every bill with a UPI payment on the chosen day, to match against the UPI app
+async function showUpiTally(day) {
+  const m = modal({
+    title: "UPI received — end-of-day tally", wide: true,
+    body: `<div class="row"><label class="f narrow">Date<input type="date" id="ut-day" value="${day}"></label>
+        <div class="btns"><button class="small" data-ud="0">Today</button><button class="small" data-ud="-1">Yesterday</button></div></div>
+      <div id="ut-sum" class="grid g4"></div>
+      <div class="muted" style="font-size:12px">Match the UPI total with your UPI app / bank SMS for the day. Count the cash drawer against "Cash in Hand".</div>
+      <div id="ut-res" class="tbl-wrap" style="max-height:50vh"></div>`,
+    foot: `<button class="primary" data-print>Print preview</button>`,
+  });
+  let rows = [], cur = day;
+  const go = async () => {
+    cur = $("#ut-day", m.el).value || todayStr();
+    const res = await guard(() => api("list_bills", { from: cur, to: cur })); if (!res) return;
+    const act = res.filter(b => b.status === "ACTIVE");
+    rows = act.filter(b => Math.abs(+b.pay_upi || 0) > 0.001).reverse();
+    const sum = k => act.reduce((a, b) => a + (+b[k] || 0), 0);
+    const tile = (k, v, s = "", cls = "") => `<div class="kpi ${cls}"><div class="k">${k}</div><div class="v" style="font-size:20px">${v}</div><div class="s">${s}</div></div>`;
+    $("#ut-sum", m.el).innerHTML = tile("UPI received", money(sum("pay_upi")), `${rows.length} bill${rows.length === 1 ? "" : "s"}`, "upi")
+      + tile("Cash received", money(sum("pay_cash")), "from bills (net of refunds)")
+      + tile("Card", money(sum("pay_card"))) + tile("Cheque", money(sum("pay_cheque")));
+    $("#ut-res", m.el).innerHTML = rows.length ? `<table class="t"><thead><tr><th>#</th><th>Time</th><th>Bill No</th><th>Customer</th><th>Mobile</th><th>Ref</th><th class="r">Bill total</th><th class="r">Cash part</th><th class="r">UPI amount</th></tr></thead><tbody>
+      ${rows.map((b, i) => `<tr><td>${i + 1}</td><td>${esc((b.created_at || "").slice(11, 16))}</td><td><button class="link" data-ub="${b.id}">${esc(b.bill_no)}</button></td><td>${esc(b.customer || "")}</td><td>${esc(b.mobile || "")}</td><td>${esc(b.pay_ref || "")}</td>
+        <td class="r">${m2(b.net)}</td><td class="r">${b.pay_cash ? m2(b.pay_cash) : ""}</td><td class="r"><b>${m2(b.pay_upi)}</b></td></tr>`).join("")}
+      </tbody><tfoot><tr><td colspan="8">Total UPI — ${rows.length} bills</td><td class="r">${money(sum("pay_upi"))}</td></tr></tfoot></table>`
+      : `<div class="empty">No UPI payments on ${dmy(cur)}.</div>`;
+    $$("[data-ub]", m.el).forEach(b => b.onclick = () => viewBill(+b.dataset.ub));
+  };
+  $("#ut-day", m.el).onchange = go;
+  $$("[data-ud]", m.el).forEach(b => b.onclick = () => { $("#ut-day", m.el).value = shiftDate(todayStr(), +b.dataset.ud); go(); });
+  $("[data-print]", m.el).onclick = () => {
+    const tot = rows.reduce((a, b) => a + (+b.pay_upi || 0), 0);
+    printHTML(`<div class="inv a4"><h1>${esc(B.settings.shop_name)}</h1><div class="title">UPI RECEIVED — ${dmy(cur)}</div><br>
+      <table><thead><tr><th>#</th><th>Time</th><th>Bill No</th><th>Customer</th><th>Mobile</th><th>Ref</th><th>UPI Amount</th></tr></thead><tbody>
+      ${rows.map((b, i) => `<tr><td class="c">${i + 1}</td><td>${esc((b.created_at || "").slice(11, 16))}</td><td>${esc(b.bill_no)}</td><td>${esc(b.customer || "")}</td><td>${esc(b.mobile || "")}</td><td>${esc(b.pay_ref || "")}</td><td class="r">${m2(b.pay_upi)}</td></tr>`).join("")}
+      <tr><td colspan="6"><b>TOTAL UPI (${rows.length} bills)</b></td><td class="r"><b>${m2(tot)}</b></td></tr></tbody></table>
+      <div style="margin-top:24px">Checked with UPI app: ____________ &nbsp;&nbsp; Signature: ____________</div></div>`,
+      "@page { size: A4 portrait; margin: 10mm; }", { title: `Print preview — UPI ${dmy(cur)}`, kind: "report" });
   };
   go();
 }

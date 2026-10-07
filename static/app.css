@@ -146,6 +146,8 @@ tr.cancelled td { color: var(--muted); text-decoration: line-through; }
 .kpi.alert { border-color: #efb2ad; background: var(--bad-soft); }
 .kpi.alert .v { color: var(--bad); }
 .kpi.good .v { color: var(--ok); }
+.kpi.upi { border-color: #c9b8f0; background: #f6f2fe; }
+.kpi.upi .v { color: #5b3cc4; }
 
 /* Bars */
 .hbar { display: grid; grid-template-columns: minmax(110px, 38%) 1fr auto; gap: 8px; align-items: center; font-size: 13px; padding: 4px 0; }
