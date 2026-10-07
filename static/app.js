@@ -1699,13 +1699,20 @@ PAGES.settings = async main => {
 };
 
 // ---------------------------------------------------------------- start
+// The page stays hidden (body.booting) until we know who is logged in, so the
+// app screens never flash before the sign-in box.
+const ready = () => document.body.classList.remove("booting");
 (async () => {
   saveLQ();
   let st = null;
   try { const r = await fetch("/api/auth_status", { method: "POST" }); st = (await r.json()).data; } catch { /* handled below */ }
-  if (!st) { await guard(loadB); route(); return; }   // engine not running: route() shows the message
-  if (!st.user) { showLogin(); return; }
-  await guard(loadB);
-  applyRole();
-  route();
+  try {
+    if (!st) { await guard(loadB); await route(); return; }   // engine not running: route() shows the message
+    if (!st.user) { await showLogin(); return; }
+    await guard(loadB);
+    applyRole();
+    await route();
+  } finally {
+    ready();
+  }
 })();
