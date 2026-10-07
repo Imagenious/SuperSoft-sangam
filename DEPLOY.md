@@ -63,7 +63,7 @@ If you skip this step, SuperSoft starts with an empty database. That's fine for 
 
 ## Step 7 — After going live
 - **Use only the online version from now on.** If you also keep entering bills on the PC version, the two copies go out of step.
-- **Free plan:** PythonAnywhere pauses free web apps after 3 months. Log in and click **"Run until 3 months from today"** on the Web tab before then.
+- **Free plan:** PythonAnywhere pauses free web apps after **1 month**. Log in and click **"Run until 1 month from today"** on the Web tab before then. They email you a week before.
 - **Backups:** SuperSoft makes a daily backup in `data/backups/` on the server. Once a week, download the newest file from the **Files** tab to your PC.
 - **Printing:** barcode labels and invoices print from the shop PC's browser, exactly as before.
 
