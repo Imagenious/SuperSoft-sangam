@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SuperSoft</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="brand">
+      <img src="logo.png" alt="SuperSoft — Innovating Ahead" class="brand-logo">
+      <div class="brand-sub" id="shop-name-side"></div>
+    </div>
+    <nav id="nav">
+      <a href="#dashboard" data-page="dashboard"><span class="ic">▦</span>Dashboard</a>
+      <a href="#sales" data-page="sales"><span class="ic">₹</span>Sales / Billing<kbd>F2</kbd></a>
+      <a href="#bills" data-page="bills"><span class="ic">≡</span>Bills &amp; Returns</a>
+      <a href="#customers" data-page="customers"><span class="ic">☺</span>Customers</a>
+      <a href="#expenses" data-page="expenses"><span class="ic">₹</span>Expenses &amp; Cash</a>
+      <a href="#inward" data-page="inward"><span class="ic">↓</span>Stock Inward<kbd>F3</kbd></a>
+      <a href="#inwards" data-page="inwards"><span class="ic">☰</span>Inward History</a>
+      <a href="#stock" data-page="stock"><span class="ic">◫</span>Stock / Items</a>
+      <a href="#labels" data-page="labels"><span class="ic">▥</span>Barcode Labels<span class="badge" id="label-count"></span></a>
+      <a href="#reports" data-page="reports"><span class="ic">◔</span>Reports</a>
+      <a href="#masters" data-page="masters"><span class="ic">✎</span>Masters</a>
+      <a href="#settings" data-page="settings"><span class="ic">⚙</span>Settings</a>
+    </nav>
+    <div id="user-box" class="user-box"></div>
+  </aside>
+  <main id="main"></main>
+</div>
+<div id="modal-root"></div>
+<div id="toast-root"></div>
+<div id="print-root"></div>
+<style id="page-style"></style>
+<script src="barcode.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
