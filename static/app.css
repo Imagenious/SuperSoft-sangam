@@ -60,6 +60,9 @@ body.booting #app { visibility: hidden; }
 .login-card h2 { margin: 0; font-size: 18px; text-align: center; color: var(--brand); }
 .login-logo { width: 150px; align-self: center; }
 .login-err { color: var(--bad); font-size: 13px; min-height: 1em; }
+.login-note { background: var(--warn-soft); color: #6d4300; border-radius: 6px; padding: 8px 10px; font-size: 13px; text-align: center; }
+#idle-warn { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 90; display: flex; gap: 14px; align-items: center;
+  background: #fff7e0; border: 1px solid #f1d29b; color: #6d4300; padding: 10px 14px; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.18); font-size: 14px; max-width: calc(100% - 32px); }
 
 /* Main */
 #main { flex: 1; min-width: 0; padding: 20px 24px 40px; }

@@ -29,7 +29,7 @@ async function api(fn, body = {}) {
     throw new Error(NOT_RUNNING);
   }
   const j = await r.json();
-  if (r.status === 401 && j.auth) { showLogin(); throw new Error("Please log in again"); }
+  if (r.status === 401 && j.auth) { showLogin("Your session has ended. Please sign in again."); throw new Error("Please sign in again"); }
   if (!j.ok) throw new Error(j.error || "Error");
   return j.data;
 }
@@ -115,7 +115,7 @@ function changePasswordForm() {
     async v => { if (v.new !== v.new2) throw new Error("New passwords do not match"); const r = await api("change_password", { old: v.old, new: v.new }); toast("Password changed", "ok"); return r; });
 }
 // Login / first-time setup screen
-async function showLogin() {
+async function showLogin(message = "") {
   if ($("#login-root")) return;
   let st = { needs_setup: false, can_setup_here: false };
   try { const r = await fetch("/api/auth_status", { method: "POST" }); st = (await r.json()).data || st; } catch { /* server down */ }
@@ -125,6 +125,7 @@ async function showLogin() {
   el.innerHTML = `<form class="login-card" autocomplete="on">
       <img src="logo.png" alt="SuperSoft" class="login-logo">
       <h2>${setup ? "Create owner account" : "Sign in"}</h2>
+      ${message && !setup ? `<div class="login-note">${esc(message)}</div>` : ""}
       ${setup && !st.can_setup_here ? `<div class="banner">No owner account exists yet. For safety it must be created from the server console:<br><code>python manage.py create-owner</code></div>`
         : `${setup ? `<div class="muted" style="font-size:13px">First-time setup: create the owner login. The owner can see everything and add staff logins later in Settings.</div>
             <label class="f">Your name<input name="name" autocomplete="name"></label>` : ""}
@@ -145,6 +146,7 @@ async function showLogin() {
     const j = await r.json();
     if (!j.ok) { $("#login-err").textContent = j.error; return; }
     el.remove();
+    IDLE.last = 0; IDLE.lastPing = Date.now(); markActive();
     await loadB(); applyRole(); route();
   };
 }
@@ -1702,6 +1704,8 @@ PAGES.settings = async main => {
     <div class="muted" style="font-size:12px;margin-top:8px">GST is charged on every bill and shown as CGST + SGST. MRP is GST-inclusive (as required for MRP-labelled goods), so the GST is part of the MRP.
       Choose "By sub-category / price slab" later to use the rates below and each sub-category's GST setting.</div>
     <div class="row" style="margin-top:12px">${F("gst_threshold", "Slab: price limit per piece ₹", "number")}${F("gst_low", "Slab: GST % up to the limit", "number")}${F("gst_high", "Slab: GST % above the limit", "number")}</div></div>
+  <div class="card"><h2>Security</h2><div class="row">${S("idle_logout_minutes", "Auto sign-out after no activity", [["5", "5 minutes"], ["10", "10 minutes"], ["15", "15 minutes"], ["30", "30 minutes"], ["60", "1 hour"], ["0", "Never"]])}</div>
+    <div class="muted" style="font-size:12px;margin-top:8px">If nobody uses SuperSoft for this long, it signs out and asks for the username and password again. A warning appears one minute before. Work in progress (for example a half-entered bill) is kept.</div></div>
   <div class="card"><h2>Payment</h2><div class="row">${S("balance_mode", "Default mode for balance after cash", [["UPI", "UPI"], ["CARD", "Card"], ["CHEQUE", "Cheque"]])}</div>
     <div class="muted" style="font-size:12px;margin-top:8px">At billing you enter only the cash received; the remaining amount is automatically taken by this mode (it can be changed on each bill).</div></div>
   <div class="card"><h2>Pricing &amp; stock</h2><div class="row">${F("default_markup", "Default markup %", "number")}
@@ -1747,6 +1751,61 @@ PAGES.settings = async main => {
 // ---------------------------------------------------------------- start
 // The page stays hidden (body.booting) until we know who is logged in, so the
 // app screens never flash before the sign-in box.
+// ---------------------------------------------------------------- auto logout when idle
+// Activity = mouse, keyboard, touch or scroll in any SuperSoft tab (shared through localStorage).
+// The server enforces the same limit; the pings below keep the server session alive while someone is working.
+const IDLE = { last: Date.now(), lastPing: Date.now(), warnTimer: null };
+const idleLimitMs = () => Math.max(0, +(B.settings && B.settings.idle_logout_minutes) || 0) * 60000;
+const loggedIn = () => !!(B.me && !$("#login-root"));
+function markActive() {
+  const t = Date.now();
+  if (t - IDLE.last < 2000) return;
+  IDLE.last = t;
+  store.set("last_activity", t);
+  hideIdleWarning();
+  if (loggedIn() && t - IDLE.lastPing > 120000) {   // heartbeat at most every 2 minutes while active
+    IDLE.lastPing = t;
+    fetch("/api/ping", { method: "POST" }).then(r => { if (r.status === 401) idleLogout("Your session has ended. Please sign in again."); }).catch(() => {});
+  }
+}
+["mousemove", "mousedown", "keydown", "wheel", "scroll", "touchstart"].forEach(ev => window.addEventListener(ev, markActive, { passive: true, capture: true }));
+function lastActivity() { return Math.max(IDLE.last, +store.get("last_activity", 0) || 0); }
+function checkIdle() {
+  const limit = idleLimitMs();
+  if (!limit || !loggedIn()) { hideIdleWarning(); return; }
+  const left = limit - (Date.now() - lastActivity());
+  if (left <= 0) idleLogout(`You were signed out after ${Math.round(limit / 60000)} minutes without activity.`);
+  else if (left <= 60000) showIdleWarning();
+  else hideIdleWarning();
+}
+function showIdleWarning() {
+  let el = $("#idle-warn");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "idle-warn";
+    el.innerHTML = `<span>No activity — you will be signed out in <b id="idle-secs">60</b> seconds.</span><button class="primary small" id="idle-stay">Stay logged in</button>`;
+    document.body.appendChild(el);
+    $("#idle-stay").onclick = () => { IDLE.lastPing = 0; IDLE.last = 0; markActive(); };
+  }
+  const tick = () => { const left = Math.max(0, Math.ceil((idleLimitMs() - (Date.now() - lastActivity())) / 1000)); const s = $("#idle-secs"); if (s) s.textContent = left; };
+  tick();
+  if (!IDLE.warnTimer) IDLE.warnTimer = setInterval(() => { tick(); checkIdle(); }, 1000);
+}
+function hideIdleWarning() {
+  const el = $("#idle-warn"); if (el) el.remove();
+  if (IDLE.warnTimer) { clearInterval(IDLE.warnTimer); IDLE.warnTimer = null; }
+}
+async function idleLogout(msg) {
+  if (!loggedIn()) return;
+  hideIdleWarning();
+  try { await fetch("/api/logout", { method: "POST" }); } catch { /* offline: the server ends the session by itself */ }
+  B.me = null;
+  modalStack.slice().forEach(m => m.close());
+  showLogin(msg);
+}
+setInterval(checkIdle, 15000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) checkIdle(); });
+
 const ready = () => document.body.classList.remove("booting");
 (async () => {
   saveLQ();

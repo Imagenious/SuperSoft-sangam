@@ -155,6 +155,7 @@ DEFAULT_SETTINGS = {
     "balance_mode": "UPI",
     "opening_cash": "0",
     "opening_cash_date": "",
+    "idle_logout_minutes": "15",
 }
 
 SEED_SIZE_SETS = [
@@ -262,6 +263,9 @@ def connect():
         db.execute("ALTER TABLE sales ADD COLUMN pay_cheque REAL DEFAULT 0")
     if "pay_ref" not in cols:
         db.execute("ALTER TABLE sales ADD COLUMN pay_ref TEXT DEFAULT ''")
+    scols = {r[1] for r in db.execute("PRAGMA table_info(sessions)").fetchall()}
+    if "last_seen" not in scols:
+        db.execute("ALTER TABLE sessions ADD COLUMN last_seen REAL")
     apply_seed_catalogs(db)
     if not db.execute("SELECT 1 FROM settings WHERE key='seed_expense_heads'").fetchone():
         for h in SEED_EXPENSE_HEADS:
@@ -1528,7 +1532,7 @@ def api_backup(a):
 
 
 API = {k[4:]: v for k, v in globals().items() if k.startswith("api_") and callable(v)}
-READ_ONLY = {"bootstrap", "list_expenses", "list_cash_entries", "cash_book", "low_stock_details", "list_customers", "customer_bills", "find_item", "search_items", "items_by_ids", "customer_lookup", "bill_preview", "get_bill",
+READ_ONLY = {"ping", "bootstrap", "list_expenses", "list_cash_entries", "cash_book", "low_stock_details", "list_customers", "customer_bills", "find_item", "search_items", "items_by_ids", "customer_lookup", "bill_preview", "get_bill",
              "list_bills", "list_inwards", "get_inward", "dashboard", "report", "backup", "list_users"}
 
 
@@ -1578,12 +1582,35 @@ def create_user(username, password, role="STAFF", name="", can_inward=False):
         raise ApiError("This username already exists")
 
 
+def idle_limit_seconds():
+    """Auto-logout after this many seconds without activity (0 = never)."""
+    try:
+        return max(0.0, float(get_settings().get("idle_logout_minutes") or 0)) * 60
+    except ValueError:
+        return 15 * 60
+
+
 def session_user(token):
+    """The logged-in user for this session token, or None.
+    A session that has been idle longer than the idle limit is ended (enforced on the server,
+    so leaving a browser open does not keep the data accessible)."""
     if not token:
         return None
     th = hashlib.sha256(token.encode()).hexdigest()
-    u = row("""SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id
-               WHERE s.token=? AND s.expires > ? AND u.active=1""", (th, time.time()))
+    t = time.time()
+    u = row("""SELECT u.*, s.last_seen AS _last_seen FROM sessions s JOIN users u ON u.id=s.user_id
+               WHERE s.token=? AND s.expires > ? AND u.active=1""", (th, t))
+    if not u:
+        return None
+    idle = idle_limit_seconds()
+    last = u.pop("_last_seen") or 0
+    if idle and t - last > idle:
+        DB.execute("DELETE FROM sessions WHERE token=?", (th,))
+        DB.commit()
+        return None
+    if t - last > (min(20, idle / 10) if idle else 20):  # record activity (not on every single request)
+        DB.execute("UPDATE sessions SET last_seen=? WHERE token=?", (t, th))
+        DB.commit()
     return u
 
 
@@ -1591,8 +1618,8 @@ def new_session(user_id):
     token = secrets.token_urlsafe(32)
     th = hashlib.sha256(token.encode()).hexdigest()
     DB.execute("DELETE FROM sessions WHERE expires < ?", (time.time(),))
-    DB.execute("INSERT INTO sessions(token, user_id, created_at, expires) VALUES(?,?,?,?)",
-               (th, user_id, now(), time.time() + SESSION_DAYS * 86400))
+    DB.execute("INSERT INTO sessions(token, user_id, created_at, expires, last_seen) VALUES(?,?,?,?,?)",
+               (th, user_id, now(), time.time() + SESSION_DAYS * 86400, time.time()))
     return token
 
 
@@ -1628,10 +1655,14 @@ def api_save_user(a):
     return {"id": u["id"]}
 
 
-API.update(list_users=api_list_users, save_user=api_save_user)
+def api_ping(a):
+    return {"idle_logout_minutes": get_settings().get("idle_logout_minutes")}
+
+
+API.update(list_users=api_list_users, save_user=api_save_user, ping=api_ping)
 
 # API sets by role. Anything not listed for staff is owner-only.
-STAFF_APIS = {"bootstrap", "find_item", "search_items", "items_by_ids", "customer_lookup", "bill_preview", "save_bill",
+STAFF_APIS = {"ping", "bootstrap", "find_item", "search_items", "items_by_ids", "customer_lookup", "bill_preview", "save_bill",
               "get_bill", "list_bills", "list_customers", "save_customer", "customer_bills"}
 INWARD_APIS = {"save_inward", "list_inwards", "get_inward", "update_inward", "save_brand", "save_supplier"}
 # Fields hidden from staff (cost / profit / cash position)
